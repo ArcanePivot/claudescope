@@ -1,58 +1,53 @@
 # ClaudeScope
 
-Local-first usage, cost, and pressure dashboard for Claude Code.
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+ClaudeScope is a local-first dashboard for understanding Claude Code usage from local session logs. It turns Claude Code metadata into a clean desktop dashboard with token trends, local pressure windows, session and subagent rankings, model distribution, cache behavior, and estimated cost.
 
 ![ClaudeScope dashboard](assets/claudescope-dashboard.jpg)
 
-ClaudeScope scans your local Claude Code session logs under `~/.claude/projects/` and turns token usage, model distribution, session/subagent rankings, cache behavior, estimated cost, and local pressure windows into a browser dashboard you can open directly.
-
-It is a static HTML app: no backend, no account connection, no remote telemetry. Real usage data is written only to your local `data.js`, which is excluded by `.gitignore` by default.
-
-[中文说明](README.zh-CN.md)
+The dashboard is a static HTML app: no backend, no account connection, and no hosted telemetry. Your real usage export stays local in `data.js`, which is intentionally ignored by git.
 
 ## Why
 
-Claude Code can generate a large number of jsonl session logs across multiple workspaces. Raw logs make it hard to answer basic operational questions:
+Claude Code can generate a large number of jsonl logs across many workspaces and subagents. Raw logs are hard to reason about when you want to know where usage actually went.
 
-- How many tokens and how much estimated USD did I spend today / this week?
-- Which workspace or session consumed the most?
-- Which models were used most frequently?
-- How much local pressure is building in the 5-hour and 7-day windows?
-- How much did subagents actually consume, and which parent sessions do they belong to?
-
-ClaudeScope computes those answers locally and keeps your data on your machine.
-
-## What it is not
-
-ClaudeScope is **not** an official Anthropic quota monitor. Anthropic does not expose account-level remaining quota through local Claude Code logs. The 5-hour / 7-day pressure cards are local estimates based on configurable token thresholds, intended as an early warning signal only. Always treat Anthropic Console as the source of truth for billing and account status.
+ClaudeScope is built for that narrow job: generate a local export, open a local page, and see token volume, model mix, session hotspots, subagent cost, and local pressure signals in one place without shipping prompts or project data to another service.
 
 ## Features
 
-- Token trends split by input, cache read, cache creation, and output tokens
-- Time ranges: last 24 hours, today, 7 days, 30 days, all time, and custom ranges
-- Session and model rankings with parent-session aggregation and optional subagent expansion
+- Cumulative token trend split by input, cache read, cache creation, and output tokens
+- Date filters for last 24 hours, today, last 7 days, last 30 days, all history, and custom ranges
+- Session and model rankings with token totals, request counts, and estimated cost
+- Subagent-aware accounting: merge into parent sessions by default, expand on demand
 - Local pressure estimation for 5-hour and 7-day windows with explicit disclaimers
-- Cost estimation based on public Anthropic USD prices
+- Cost estimation by model and token type using public Anthropic USD prices
 - Clear `unpriced` badges for unknown/custom models instead of silently showing `$0.00`
-- Full override pricing via `~/.claude-scope/pricing.json`
-- Custom pressure thresholds via `~/.claude-scope/risk.json`
+- User pricing overrides via `~/.claude-scope/pricing.json`
+- User pressure thresholds via `~/.claude-scope/risk.json`
 - Automatic filtering for `<synthetic>` placeholder rows
-- macOS and Windows release packages with prebuilt binaries
+- macOS and Windows release packages with prebuilt generators
 
-## Quick start
+## Quick Start
 
-Download a release package:
+Normal users should download a platform package from [GitHub Releases](https://github.com/ArcanePivot/claudescope/releases):
 
-- **macOS**: unzip `ClaudeScope-mac.zip`, then double-click `Open ClaudeScope.command`
-- **Windows**: unzip `ClaudeScope-windows.zip`, then double-click `Open ClaudeScope.cmd`
+- **macOS**: download `ClaudeScope-mac.zip`, unzip it, then double-click `Open ClaudeScope.command`
+- **Windows**: download `ClaudeScope-windows.zip`, unzip it, then double-click `Open ClaudeScope.cmd`
 
-The launcher runs the local generator, writes `data.js`, and opens `index.html` in your default browser. Running it again rescans changed Claude Code logs.
+Release zips include a prebuilt generator, so normal users do not need Go or Node.js. The launcher generates `data.js` from your local Claude Code logs and then opens `index.html` in your default browser.
 
-> If macOS blocks `Open ClaudeScope.command`, open **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine .` in the extracted folder.
+> GitHub's automatic **Source code (zip)** asset is for developers, not the recommended user download. Prefer `ClaudeScope-mac.zip` / `ClaudeScope-windows.zip`.
 
-> GitHub's auto-generated **Source code (zip)** is for developers. End users should download `ClaudeScope-mac.zip` or `ClaudeScope-windows.zip`.
+If macOS blocks `Open ClaudeScope.command`, open **System Settings → Privacy & Security** and click **Open Anyway**. You can also run this once in Terminal from the extracted folder:
+
+```bash
+xattr -dr com.apple.quarantine .
+```
 
 ## CLI
+
+The release binary and the source-tree `bin/claude-scope` wrapper support:
 
 ```bash
 claudescope generate [--root <dir>] [--out <file>] [--since <RFC3339>] [--window-days <n>]
@@ -69,6 +64,27 @@ npm run build
 ./bin/claude-scope open
 ```
 
+By default, the generator reads Claude Code logs from:
+
+```text
+~/.claude/projects/
+```
+
+If your logs are stored elsewhere, pass the path explicitly:
+
+```bash
+claudescope generate --root /path/to/projects
+```
+
+## What Gets Displayed
+
+- **Token trend**: cumulative input, cache read, cache creation, and output tokens over the selected range
+- **Local pressure**: estimated 5-hour and 7-day pressure windows based on configurable token thresholds
+- **Distribution**: request count or token volume grouped by time bucket
+- **Rankings**: busiest sessions, subagents, and models for the selected period
+- **Cost estimate**: local estimate by model and token type using pricing rules exported by the generator
+- **Dataset notes**: scan count, dedup stats, filtered rows, pricing source, and schema version
+
 ## Configuration
 
 Optional config files live in `~/.claude-scope/`:
@@ -80,39 +96,41 @@ Optional config files live in `~/.claude-scope/`:
 
 If a config file is missing, ClaudeScope uses built-in defaults. If a file is invalid, the generator prints a warning and falls back to defaults instead of breaking the dashboard.
 
-## Data flow
+## Data Flow
 
-1. Claude Code writes local session logs to `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl`
+1. Claude Code writes local JSONL logs under `~/.claude/projects/<encoded-cwd>/`
 2. Subagent logs are detected from nested `subagents/` paths
-3. `claudescope generate` scans `*.jsonl` files and extracts message-level usage metadata only
+3. `claudescope generate` scans local `*.jsonl` files and extracts usage metadata only
 4. Duplicate usage rows are globally deduplicated
 5. Subagent tokens are merged into parent sessions by default while retaining expand/collapse metadata
 6. Pricing and local pressure windows are computed from built-in or user-provided config
-7. The result is written as `window.CLAUDESCOPE_DATA = {...}` in `data.js`
-8. `index.html` loads sample data first, then real local `data.js` if present
+7. The generator writes `window.CLAUDESCOPE_DATA = {...}` to `data.js`
+8. `index.html` loads bundled sample data first and then real local `data.js` if present
 
 ## Privacy
 
-ClaudeScope does not send data to any server. The generator reads usage metadata only:
+ClaudeScope does not send data to any server. The generator reads local Claude Code logs and exports only usage metadata:
 
-- session id and workspace basename, not full paths
+- session id and working-directory basename, not full paths
 - model name and token counts
 - timestamps, subagent parent relationship, and API failure status
 
-It does **not** export conversation text, prompts, assistant replies, tool output, or file contents.
+It does **not** export prompt text, assistant messages, tool output, file contents, or conversation transcripts.
 
-Review screenshots or `data.js` before sharing them.
+Review screenshots or `data.js` before sharing artifacts generated from your own usage.
 
-## Cost estimation
+## Accuracy Notes
 
-Cost is an estimate: local token counts multiplied by public pricing rules. It is not an official bill. USD is the base unit. CNY display is a convenience conversion only and should not be used for billing.
+ClaudeScope is not an official Anthropic quota monitor. Anthropic does not expose account-level remaining quota through local Claude Code logs. The 5-hour / 7-day pressure cards are local estimates based on configurable token thresholds and should be treated as early warning signals only.
+
+Cost is also an estimate: local token counts multiplied by public pricing rules. It is not an official bill. USD is the base unit; CNY display is a convenience conversion only and should not be used for billing.
 
 ## Schema
 
 - [docs/schema-v3.md](docs/schema-v3.md) — V3 data format
 - [docs/schema-v2-compat.md](docs/schema-v2-compat.md) — V2 compatibility path
 
-## Build release packages
+## Build Release Packages
 
 ```bash
 npm install
@@ -124,7 +142,9 @@ Outputs:
 - `dist/ClaudeScope-mac.zip`
 - `dist/ClaudeScope-windows.zip`
 
-## Developer verification
+The GitHub Actions release workflow builds the same zip files for tags named `v*`.
+
+## Developer Verification
 
 `npm run verify` uses Playwright for responsive layout snapshots. First-time setup requires browser binaries:
 
@@ -140,7 +160,7 @@ End users do not need Playwright.
 
 ClaudeScope is forked from the community project [CodexScope](https://github.com/JUk1-GH/CodexScope), an OpenAI Codex usage dashboard. The static-dashboard architecture, `buildView` foundation, time utilities, worker-pool design, and release packaging flow originate from upstream.
 
-This repository changes the data source to Claude Code and adds cache creation tokens, subagent parent aggregation, local pressure estimation, custom pricing/risk configuration, and Claude-specific schema handling.
+This repository changes the data source to Claude Code and adds cache creation tokens, subagent parent aggregation, local pressure estimation, custom pricing/risk configuration, global usage-row deduplication, and Claude-specific schema handling.
 
 Fork base:
 
