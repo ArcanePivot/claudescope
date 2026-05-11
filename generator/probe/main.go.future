@@ -1,0 +1,398 @@
+// ClaudeScope Schema Probe
+//
+// 只读、脱敏的字段存在性扫描工具。用于 Phase 2.6：在 generator 真正动手解析前，
+// 先验证 ~/.claude/projects/ 下真实 jsonl 的字段命名、分布、覆盖率。
+//
+// 严格隐私边界：本工具**绝不输出** prompt / message.content / 完整 cwd /
+// 完整 uuid / API key / OAuth URL / jsonl 原文。
+// 只输出字段存在性计数与模型名分布。
+//
+// 用法：
+//   go run ./generator/probe --root ~/.claude/projects --out probe-report.json
+//   go run ./generator/probe --root ./fixtures
+//
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
+type fieldCounter struct {
+	Total    int            `json:"total"`
+	Present  map[string]int `json:"present"` // 字段名 → 出现次数
+	Absent   map[string]int `json:"absent"`
+}
+
+func newFieldCounter() *fieldCounter {
+	return &fieldCounter{
+		Present: map[string]int{},
+		Absent:  map[string]int{},
+	}
+}
+
+type probeReport struct {
+	GeneratedAt        string         `json:"generatedAt"`
+	Root               string         `json:"rootSummary"` // 不输出完整路径，只输出"~/.claude/projects 或 fixtures 等概要"
+	Files              int            `json:"files"`
+	Lines              int            `json:"lines"`
+	ParseErrors        int            `json:"parseErrors"`
+
+	// 顶层 type 分布
+	TypeDistribution   map[string]int `json:"typeDistribution"`
+
+	// assistant 消息字段覆盖率
+	AssistantRows      int            `json:"assistantRows"`
+	HasMessageId       int            `json:"hasMessageId"`
+	HasRequestId       int            `json:"hasRequestId"`
+	HasUuid            int            `json:"hasUuid"`
+	HasSessionId       int            `json:"hasSessionId"`
+	HasUsage           int            `json:"hasUsage"`
+	HasIsSidechainTrue int            `json:"hasIsSidechainTrue"`
+	HasAgentId         int            `json:"hasAgentId"`
+	HasIsApiErrorTrue  int            `json:"hasIsApiErrorTrue"`
+	HasParentUuid      int            `json:"hasParentUuid"`
+	HasGitBranch       int            `json:"hasGitBranch"`
+	HasCwd             int            `json:"hasCwd"`
+
+	// 模型名分布（模型名本身不敏感，可输出）
+	ModelDistribution  map[string]int `json:"modelDistribution"`
+
+	// usage 内键名分布（哪些 token 字段实际出现）
+	UsageKeyDistribution map[string]int `json:"usageKeyDistribution"`
+
+	// 顶层未知键（除了已知集合之外的字段名计数，便于发现 schema 漂移）
+	UnknownTopKeys     map[string]int `json:"unknownTopKeys"`
+
+	// 子代理路径检测（仅统计含 /subagents/ 或 agent- 前缀的文件数，不输出完整路径）
+	SubagentPathFiles  int            `json:"subagentPathFiles"`
+
+	// 第三方/历史模型行数（model 不以 claude- 开头）
+	ThirdPartyRows     int            `json:"thirdPartyRows"`
+
+	// 重复 message.id+requestId 行数（仅统计同一 jsonl 内的重复，不跨文件）
+	DuplicateRows      int            `json:"duplicateRowsWithinFile"`
+}
+
+// 已知的顶层字段（其它的进 UnknownTopKeys）
+var knownTopKeys = map[string]bool{
+	"type": true, "uuid": true, "sessionId": true, "agentId": true,
+	"requestId": true, "timestamp": true, "cwd": true, "gitBranch": true,
+	"parentUuid": true, "isSidechain": true, "isApiErrorMessage": true,
+	"message": true, "summary": true, "leafUuid": true, "version": true,
+	"userType": true, "isCompactSummary": true, "isMeta": true, "level": true,
+	"toolUseResult": true, "toolUseID": true,
+}
+
+func newReport(root string) *probeReport {
+	return &probeReport{
+		GeneratedAt:          time.Now().Format("2006-01-02 15:04:05"),
+		Root:                 redactRootPath(root),
+		TypeDistribution:     map[string]int{},
+		ModelDistribution:    map[string]int{},
+		UsageKeyDistribution: map[string]int{},
+		UnknownTopKeys:       map[string]int{},
+	}
+}
+
+// redactRootPath 不输出完整路径，仅输出脱敏概要
+func redactRootPath(root string) string {
+	abs, _ := filepath.Abs(root)
+	home, _ := os.UserHomeDir()
+	if home != "" && strings.HasPrefix(abs, home) {
+		return "$HOME" + abs[len(home):]
+	}
+	return filepath.Base(abs)
+}
+
+func main() {
+	root := flag.String("root", "", "扫描根目录（默认 ~/.claude/projects）")
+	outPath := flag.String("out", "", "输出 JSON 报告路径（默认 stdout）")
+	maxFiles := flag.Int("max-files", 0, "最多扫描文件数（0=全部）")
+	flag.Parse()
+
+	if *root == "" {
+		home, _ := os.UserHomeDir()
+		*root = filepath.Join(home, ".claude", "projects")
+	}
+
+	report := newReport(*root)
+	files, err := findJsonl(*root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "扫描失败：%v\n", err)
+		os.Exit(1)
+	}
+	if *maxFiles > 0 && len(files) > *maxFiles {
+		files = files[:*maxFiles]
+	}
+	report.Files = len(files)
+
+	for _, file := range files {
+		if strings.Contains(file, "/subagents/") || strings.Contains(filepath.Base(file), "agent-") {
+			report.SubagentPathFiles++
+		}
+		scanFile(file, report)
+	}
+
+	emitReport(report, *outPath)
+}
+
+func findJsonl(root string) ([]string, error) {
+	var out []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // 不阻塞遍历，记录失败的目录但继续
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(path), ".jsonl") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	return out, err
+}
+
+func scanFile(path string, report *probeReport) {
+	f, err := os.Open(path)
+	if err != nil {
+		report.ParseErrors++
+		return
+	}
+	defer f.Close()
+
+	// 文件内 message.id+requestId 去重检测
+	seen := map[string]bool{}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024) // 支持长行
+	for scanner.Scan() {
+		report.Lines++
+		var row map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
+			report.ParseErrors++
+			continue
+		}
+		processRow(row, report, seen)
+	}
+}
+
+func processRow(row map[string]any, report *probeReport, seen map[string]bool) {
+	// 顶层 type
+	if t, ok := row["type"].(string); ok {
+		report.TypeDistribution[t]++
+	}
+
+	// 检测未知顶层键
+	for k := range row {
+		if !knownTopKeys[k] {
+			report.UnknownTopKeys[k]++
+		}
+	}
+
+	// 只关心 assistant 行
+	if t, _ := row["type"].(string); t != "assistant" {
+		return
+	}
+	report.AssistantRows++
+
+	// 顶层字段存在性
+	if _, ok := row["uuid"]; ok {
+		report.HasUuid++
+	}
+	if _, ok := row["sessionId"]; ok {
+		report.HasSessionId++
+	}
+	if _, ok := row["agentId"]; ok {
+		report.HasAgentId++
+	}
+	if _, ok := row["requestId"]; ok {
+		report.HasRequestId++
+	}
+	if _, ok := row["parentUuid"]; ok {
+		report.HasParentUuid++
+	}
+	if _, ok := row["gitBranch"]; ok {
+		report.HasGitBranch++
+	}
+	if _, ok := row["cwd"]; ok {
+		report.HasCwd++
+	}
+	if v, ok := row["isSidechain"].(bool); ok && v {
+		report.HasIsSidechainTrue++
+	}
+	if v, ok := row["isApiErrorMessage"].(bool); ok && v {
+		report.HasIsApiErrorTrue++
+	}
+
+	// 进入 message.*
+	msg, _ := row["message"].(map[string]any)
+	if msg == nil {
+		return
+	}
+	msgId, _ := msg["id"].(string)
+	if msgId != "" {
+		report.HasMessageId++
+	}
+
+	// 模型名（不敏感，可输出）
+	if model, ok := msg["model"].(string); ok && model != "" {
+		report.ModelDistribution[model]++
+		if !strings.HasPrefix(model, "claude-") && model != "<synthetic>" {
+			report.ThirdPartyRows++
+		}
+	}
+
+	// usage 字段
+	if usage, ok := msg["usage"].(map[string]any); ok {
+		report.HasUsage++
+		for k := range usage {
+			report.UsageKeyDistribution[k]++
+		}
+	}
+
+	// 文件内去重检测
+	requestId, _ := row["requestId"].(string)
+	if msgId != "" && requestId != "" {
+		key := msgId + ":" + requestId
+		if seen[key] {
+			report.DuplicateRows++
+		} else {
+			seen[key] = true
+		}
+	}
+}
+
+func emitReport(report *probeReport, outPath string) {
+	// JSON
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "序列化失败：%v\n", err)
+		os.Exit(1)
+	}
+
+	if outPath != "" {
+		if err := os.WriteFile(outPath, data, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "写文件失败：%v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// 终端摘要（不论是否写文件都输出，便于 Master 直接看）
+	printSummary(report)
+}
+
+func printSummary(r *probeReport) {
+	fmt.Println("================================================================")
+	fmt.Println("  ClaudeScope Schema Probe · 脱敏字段统计")
+	fmt.Println("================================================================")
+	fmt.Printf("生成时间    : %s\n", r.GeneratedAt)
+	fmt.Printf("扫描根目录  : %s\n", r.Root)
+	fmt.Printf("文件数      : %d\n", r.Files)
+	fmt.Printf("总行数      : %d\n", r.Lines)
+	fmt.Printf("解析失败行  : %d\n", r.ParseErrors)
+	fmt.Printf("子代理路径  : %d 个文件\n", r.SubagentPathFiles)
+	fmt.Println()
+
+	fmt.Println("type 分布：")
+	printSortedMap(r.TypeDistribution)
+	fmt.Println()
+
+	fmt.Printf("assistant 行数 : %d\n", r.AssistantRows)
+	if r.AssistantRows > 0 {
+		fmt.Printf("  含 message.id      : %d (%.1f%%)\n", r.HasMessageId, pct(r.HasMessageId, r.AssistantRows))
+		fmt.Printf("  含 requestId       : %d (%.1f%%)\n", r.HasRequestId, pct(r.HasRequestId, r.AssistantRows))
+		fmt.Printf("  含 uuid            : %d (%.1f%%)\n", r.HasUuid, pct(r.HasUuid, r.AssistantRows))
+		fmt.Printf("  含 sessionId       : %d (%.1f%%)\n", r.HasSessionId, pct(r.HasSessionId, r.AssistantRows))
+		fmt.Printf("  含 agentId         : %d (%.1f%%)\n", r.HasAgentId, pct(r.HasAgentId, r.AssistantRows))
+		fmt.Printf("  含 parentUuid      : %d (%.1f%%)\n", r.HasParentUuid, pct(r.HasParentUuid, r.AssistantRows))
+		fmt.Printf("  含 gitBranch       : %d (%.1f%%)\n", r.HasGitBranch, pct(r.HasGitBranch, r.AssistantRows))
+		fmt.Printf("  含 cwd             : %d (%.1f%%)\n", r.HasCwd, pct(r.HasCwd, r.AssistantRows))
+		fmt.Printf("  含 message.usage   : %d (%.1f%%)\n", r.HasUsage, pct(r.HasUsage, r.AssistantRows))
+		fmt.Printf("  isSidechain=true   : %d (%.1f%%)\n", r.HasIsSidechainTrue, pct(r.HasIsSidechainTrue, r.AssistantRows))
+		fmt.Printf("  isApiErrorMessage  : %d (%.1f%%)\n", r.HasIsApiErrorTrue, pct(r.HasIsApiErrorTrue, r.AssistantRows))
+		fmt.Printf("  第三方模型行       : %d (%.1f%%)\n", r.ThirdPartyRows, pct(r.ThirdPartyRows, r.AssistantRows))
+		fmt.Printf("  文件内重复行       : %d (%.1f%%)\n", r.DuplicateRows, pct(r.DuplicateRows, r.AssistantRows))
+	}
+	fmt.Println()
+
+	fmt.Println("usage 内键分布（前 12）：")
+	printSortedMapTop(r.UsageKeyDistribution, 12)
+	fmt.Println()
+
+	fmt.Println("模型名分布（前 20）：")
+	printSortedMapTop(r.ModelDistribution, 20)
+	fmt.Println()
+
+	if len(r.UnknownTopKeys) > 0 {
+		fmt.Println("⚠ 未知顶层键（schema 可能漂移）：")
+		printSortedMapTop(r.UnknownTopKeys, 20)
+		fmt.Println()
+	}
+
+	fmt.Println("================================================================")
+	fmt.Println("  报告完成 · 严格脱敏 · 不含 prompt / content / 完整路径")
+	fmt.Println("================================================================")
+}
+
+func pct(n, total int) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(n) * 100 / float64(total)
+}
+
+func printSortedMap(m map[string]int) {
+	type kv struct {
+		k string
+		v int
+	}
+	pairs := make([]kv, 0, len(m))
+	for k, v := range m {
+		pairs = append(pairs, kv{k, v})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].v != pairs[j].v {
+			return pairs[i].v > pairs[j].v
+		}
+		return pairs[i].k < pairs[j].k
+	})
+	for _, p := range pairs {
+		fmt.Printf("  %-32s %d\n", p.k, p.v)
+	}
+}
+
+func printSortedMapTop(m map[string]int, top int) {
+	type kv struct {
+		k string
+		v int
+	}
+	pairs := make([]kv, 0, len(m))
+	for k, v := range m {
+		pairs = append(pairs, kv{k, v})
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].v != pairs[j].v {
+			return pairs[i].v > pairs[j].v
+		}
+		return pairs[i].k < pairs[j].k
+	})
+	limit := top
+	if len(pairs) < limit {
+		limit = len(pairs)
+	}
+	for i := 0; i < limit; i++ {
+		fmt.Printf("  %-40s %d\n", pairs[i].k, pairs[i].v)
+	}
+	if len(pairs) > limit {
+		fmt.Printf("  ... 其余 %d 个\n", len(pairs)-limit)
+	}
+}

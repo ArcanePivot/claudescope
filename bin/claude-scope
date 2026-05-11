@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# claude-scope —— 源码仓库下的 CLI 调度器。
+#
+# 行为：
+#   1. 若同目录存在已构建的 claudescope 二进制，直接 exec
+#   2. 否则用 go run 跑 generator/cmd/claudescope
+#
+# 发布包内不会出现这个脚本——release 直接给用户最终二进制。
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BIN="$ROOT/bin/claudescope"
+
+if [[ -x "$BIN" ]]; then
+  exec "$BIN" "$@"
+fi
+
+if ! command -v go >/dev/null 2>&1; then
+  echo "[claude-scope] 未找到预构建二进制，且系统未安装 go。" >&2
+  echo "  方法 A：在仓库根跑 'npm run build' 构建 bin/claudescope" >&2
+  echo "  方法 B：从 GitHub Releases 下载 ClaudeScope-mac.zip / ClaudeScope-windows.zip" >&2
+  exit 1
+fi
+
+cd "$ROOT"
+exec go run ./generator/cmd/claudescope "$@"

@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClaudeScope</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 2.5 20.2 7v9.2L12 21 3.8 16.2V7L12 2.5Z" fill="currentColor" opacity=".25"/>
+            <path d="M12 3.5 19 7.4v7.9l-7 4.1-7-4.1V7.4l7-3.9Z" fill="#fff"/>
+            <path d="M12 3.5 19 7.4l-7 4.2-7-4.2 7-3.9Z" fill="#1668f2"/>
+          </svg>
+        </span>
+        <span>ClaudeScope</span>
+      </div>
+
+      <nav class="tabs" aria-label="主导航">
+        <button class="tab active" type="button" data-scroll-target="overview">总览</button>
+        <button class="tab" type="button" data-scroll-target="quotaPanel">额度</button>
+        <button class="tab" type="button" data-scroll-target="tokenPanel">Token</button>
+        <button class="tab" type="button" data-scroll-target="sessionPanel">会话</button>
+        <button class="tab" type="button" data-scroll-target="modelPanel">模型</button>
+        <button class="tab" type="button" data-scroll-target="quotaPanel">速率</button>
+      </nav>
+
+      <div class="actions">
+        <div class="sources" aria-label="Claude Code 数据来源">
+          <span class="source-chip primary" id="sourcePrimary">Claude Code 桌面端</span>
+          <span class="source-chip" id="sourceSecondary">本地日志</span>
+          <span class="source-chip" id="sourceTertiary">压力估算</span>
+        </div>
+        <div class="date-filter" id="dateFilter" aria-label="日期筛选">
+          <button class="period-btn" type="button" data-range="24h">近24小时</button>
+          <button class="period-btn active" type="button" data-range="today">今天</button>
+          <button class="period-btn" type="button" data-range="7">7天内</button>
+          <button class="period-btn" type="button" data-range="30">30天内</button>
+          <button class="period-btn" type="button" data-range="history">历史</button>
+          <button class="period-btn" type="button" data-range="custom">自定义</button>
+          <div id="customRange" class="custom-range" hidden>
+            <input id="startDate" type="date" aria-label="开始日期">
+            <span>至</span>
+            <input id="endDate" type="date" aria-label="结束日期">
+          </div>
+        </div>
+        <div class="sync">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+            <path d="m8 12 2.4 2.4L16 8.8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span id="syncText">-- 已同步</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="overview" class="grid" aria-label="Claude Code 用量总览">
+        <article id="tokenPanel" class="panel">
+          <div class="panel-title">
+            <div class="trend-heading">
+              <h2>Token 消耗趋势 <span class="hint">i</span></h2>
+              <div id="chartMeta" class="forecast">累计 --</div>
+            </div>
+            <div class="chart-actions">
+              <div class="trend-toggle" role="group" aria-label="趋势统计方式">
+                <button class="trend-mode active" type="button" data-trend-mode="cumulative">累计</button>
+                <button class="trend-mode" type="button" data-trend-mode="interval">分时</button>
+              </div>
+              <div class="trend-toggle" role="group" aria-label="趋势尺度">
+                <button class="trend-scale active" type="button" data-trend-scale="linear">绝对</button>
+                <button class="trend-scale" type="button" data-trend-scale="log">对数</button>
+              </div>
+            </div>
+          </div>
+          <div class="legend" aria-label="趋势指标">
+            <button class="legend-item" type="button" data-series="total" aria-pressed="true"><span class="check on"></span><span>总量</span></button>
+            <button class="legend-item" type="button" data-series="cached" aria-pressed="true"><span class="check on teal"></span><span>缓存</span></button>
+            <button class="legend-item" type="button" data-series="output" aria-pressed="true"><span class="check on sky"></span><span>输出</span></button>
+            <button class="legend-item" type="button" data-series="input" aria-pressed="true"><span class="check on"></span><span>输入</span></button>
+            <button class="legend-item" type="button" data-series="reasoning" aria-pressed="true"><span class="check on violet"></span><span>缓存写入</span></button>
+          </div>
+          <div class="chart-wrap">
+            <svg id="trendChart" viewBox="0 0 1000 214" role="img" aria-label="Token 消耗折线图">
+              <line x1="40" y1="194" x2="985" y2="194" class="axis-line"/>
+              <text x="444" y="112" class="chart-label">等待本地 Claude Code 数据</text>
+            </svg>
+          </div>
+        </article>
+
+        <article id="quotaPanel" class="panel">
+          <div class="panel-title">
+            <h2>本地压力估算</h2>
+            <span id="quotaSource" class="badge">本地压力估算</span>
+          </div>
+          <div class="quota">
+            <div class="ringbox" aria-label="额度环形图">
+              <svg viewBox="0 0 210 210" aria-hidden="true">
+                <circle class="ring-bg" cx="105" cy="105" r="76"/>
+                <circle class="ring-bg" cx="105" cy="105" r="58"/>
+                <circle class="ring-bg" cx="105" cy="105" r="40"/>
+                <circle class="ring-main" cx="105" cy="105" r="76"/>
+                <circle class="ring-teal" cx="105" cy="105" r="58"/>
+                <circle class="ring-sky" cx="105" cy="105" r="40"/>
+              </svg>
+              <div class="shield">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3.2 19 6.5v5.2c0 4.4-2.8 7.3-7 9.1-4.2-1.8-7-4.7-7-9.1V6.5l7-3.3Z" fill="#fff4e0" stroke="#f59e0b" stroke-width="1.8"/>
+                  <path d="M12 8v4.5" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+                  <circle cx="12" cy="15.5" r="1.1" fill="#f59e0b"/>
+                </svg>
+                <span id="shieldState">压力估算计算中</span>
+              </div>
+            </div>
+            <div class="quota-risk">
+              <div id="riskList" class="risk-list quota-risk-list">
+                <div class="list-empty">本地压力估算加载中…</div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <section class="metrics">
+          <article class="metric metric-primary">
+            <h3>Token 总量</h3>
+            <div id="tokenTotal" class="metric-value">--</div>
+            <div class="splitbar" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+            <div class="split-legend">
+              <span><i class="dot"></i>输入<b id="inputTokens">--</b></span>
+              <span><i class="dot teal"></i>缓存<b id="cachedTokens">--</b></span>
+              <span><i class="dot sky"></i>输出<b id="outputTokens">--</b></span>
+              <span><i class="dot violet"></i>缓存写入<b id="reasoningTokens">--</b></span>
+            </div>
+          </article>
+          <article class="metric">
+            <h3>调用量</h3>
+            <div id="requestCount" class="metric-value">--</div>
+            <svg class="spark" viewBox="0 0 126 42" aria-hidden="true">
+              <path id="requestSpark" fill="none" stroke="#2f80ff" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+            <div class="metric-footer">
+              <span>成功率 <strong id="successRate">--</strong></span>
+              <span>失败 <strong id="failureCount" class="fail">--</strong></span>
+            </div>
+          </article>
+          <article class="metric">
+            <h3>峰值速率</h3>
+            <div><span id="peakRate" class="metric-value">--</span><span class="metric-unit">TPM</span></div>
+            <svg class="spark" viewBox="0 0 126 42" aria-hidden="true">
+              <path id="peakSpark" fill="none" stroke="#2f80ff" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+            <div class="metric-footer">
+              <span>当前筛选区间峰值</span>
+            </div>
+          </article>
+          <article class="metric">
+            <h3>缓存读取量</h3>
+            <div id="cacheHit" class="metric-value">--</div>
+            <div class="delta">已读取的缓存<span>token</span></div>
+            <svg class="spark small" viewBox="0 0 126 36" aria-hidden="true">
+              <path id="cacheSpark" fill="none" stroke="#2f80ff" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </article>
+        </section>
+
+        <article id="datasetNotePanel" class="panel" aria-label="本次扫描提示" hidden>
+          <div class="panel-title"><h3>本次扫描</h3><span id="datasetNoteSource" class="badge"></span></div>
+          <div id="datasetNoteBody" class="dataset-note-body"></div>
+        </article>
+
+        <section id="distributionPanel" class="coverage distribution-panel" aria-label="调用和 Token 分布">
+          <div class="panel-title distribution-title">
+            <div class="dist-heading">
+              <h3>时间分布</h3>
+              <div id="rangeSummary" class="forecast">今天</div>
+            </div>
+            <div class="dist-toolbar">
+              <div class="dist-toggle" role="group" aria-label="分布指标">
+                <button class="dist-mode active" type="button" data-dist-mode="calls">调用</button>
+                <button class="dist-mode" type="button" data-dist-mode="tokens">Token</button>
+              </div>
+            </div>
+          </div>
+          <div id="distributionChart" class="distribution-chart"></div>
+        </section>
+
+        <section class="lower">
+          <article id="sessionPanel" class="panel">
+            <div class="panel-title session-title">
+              <h3>会话排行</h3>
+              <div class="dist-toggle session-toggle" role="group" aria-label="会话排行指标">
+                <button class="session-mode active" type="button" data-session-mode="tokens">Token</button>
+                <button class="session-mode" type="button" data-session-mode="requests">调用</button>
+              </div>
+              <div id="subagentToggle" class="dist-toggle session-toggle" role="group" aria-label="子代理聚合方式" style="margin-left:8px" hidden>
+                <button class="subagent-mode active" type="button" data-subagent-mode="merged">聚合主会话</button>
+                <button class="subagent-mode" type="button" data-subagent-mode="expanded">展开子代理</button>
+              </div>
+            </div>
+            <div id="sessionList" class="rank-list">
+              <div class="session-head">
+                <span>会话</span><span>模型</span><span>Token 消耗</span><span>调用数</span><span>状态</span>
+              </div>
+              <div class="list-empty">等待本地 Claude Code 会话数据</div>
+            </div>
+            <button id="toggleSessions" class="link" type="button" hidden>展开会话 <span>↓</span></button>
+          </article>
+
+          <article id="modelPanel" class="panel">
+            <div class="panel-title"><h3>模型排行</h3></div>
+            <div id="modelList" class="model-list">
+              <div class="session-head" style="grid-template-columns:120px 1fr 72px 62px">
+                <span>模型</span><span></span><span>Token 总量</span><span>首 Token 延迟</span>
+              </div>
+              <div class="list-empty">等待本地 Claude Code 模型数据</div>
+            </div>
+            <button id="toggleModels" class="link" type="button" hidden>展开模型 <span>↓</span></button>
+          </article>
+
+          <article id="costPanel" class="panel cost-panel">
+            <div class="panel-title cost-title">
+              <h3>费用统计</h3>
+              <div class="cost-actions">
+                <span class="cost-source"><span id="costSourceLabel">本地价格估算</span>
+                  <span class="cost-help-wrap">
+                    <button id="costHelp" class="cost-help" type="button" aria-label="费用估算说明" aria-expanded="false" aria-describedby="costHelpTip">i</button>
+                    <span id="costHelpTip" class="cost-popover" role="tooltip">
+                      <b>价格表 · USD / 1M tokens</b>
+                      <table class="price-table" aria-label="Anthropic 模型价格表">
+                        <thead>
+                          <tr><th>模型</th><th>输入</th><th>缓存读</th><th>缓存写</th><th>输出</th></tr>
+                        </thead>
+                        <tbody id="priceTableBody">
+                          <tr><td colspan="5">等待价格表</td></tr>
+                        </tbody>
+                      </table>
+                      <span class="price-note">价格 = 本地 token × 配置价；实际账单与套餐额度以 Anthropic 官方为准。可在 <code>~/.claude-scope/pricing.json</code> 自定义价格。</span>
+                    </span>
+                  </span>
+                </span>
+                <div class="currency-toggle" role="group" aria-label="费用币种">
+                  <button class="currency-mode active" type="button" data-currency="USD">USD</button>
+                  <button class="currency-mode" type="button" data-currency="CNY">CNY</button>
+                </div>
+              </div>
+            </div>
+            <div id="costContent" class="cost-content">
+              <div class="list-empty">等待本地 token 用量</div>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+  <script src="./data.sample.js"></script>
+  <script src="./data.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
