@@ -48,6 +48,29 @@ If macOS blocks `Open ClaudeScope.command`, open **System Settings → Privacy &
 xattr -dr com.apple.quarantine .
 ```
 
+
+## Mobile Viewing (LAN / Tailscale)
+
+ClaudeScope is a static dashboard, so you can also view it from your phone. If your computer and phone are on the same LAN, or both are connected through Tailscale, start a local static server on the computer and open the dashboard from your mobile browser.
+
+![ClaudeScope mobile dashboard](assets/claudescope-mobile-dashboard.jpg)
+
+From the ClaudeScope folder:
+
+```bash
+python3 -m http.server 8765
+```
+
+Then open on your phone:
+
+```text
+http://<computer LAN IP>:8765/
+# or Tailscale address
+http://<computer Tailscale IP>:8765/
+```
+
+Note: `data.js` may include local project names, session IDs, timestamps, and usage patterns. Only serve it inside your trusted LAN / Tailscale network. Do not expose it to the public internet.
+
 ## CLI
 
 The release binary and the source-tree `bin/claude-scope` wrapper support:

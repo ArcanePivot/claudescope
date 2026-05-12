@@ -54,6 +54,29 @@ ClaudeScope 显示的是**本地压力估算**，不是官方剩余额度。Anth
 
 > GitHub 自动生成的 **Source code (zip)** 是给开发者看的源码包，不是普通用户入口。
 
+
+## 手机查看（局域网 / Tailscale）
+
+ClaudeScope 是纯静态页面，所以不只能在电脑上看。只要 Mac / PC 和手机处在同一个局域网，或都接入 Tailscale，就可以在电脑上启动一个本地静态服务，然后用手机浏览器打开仪表盘。
+
+![ClaudeScope 手机端](assets/claudescope-mobile-dashboard.jpg)
+
+例如在 ClaudeScope 目录运行：
+
+```bash
+python3 -m http.server 8765
+```
+
+然后在手机 Safari / Chrome 打开：
+
+```text
+http://<电脑局域网 IP>:8765/
+# 或 Tailscale 地址
+http://<电脑 Tailscale IP>:8765/
+```
+
+注意：`data.js` 可能包含本地项目名、会话 ID、时间戳和用量模式。只建议在自己的可信局域网 / Tailscale 内查看，不要暴露到公网。
+
 ## 命令行
 
 发布包内的 `claudescope` 二进制和源码仓的 `bin/claude-scope` 都接受三个子命令：
