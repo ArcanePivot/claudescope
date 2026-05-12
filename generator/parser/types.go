@@ -19,6 +19,16 @@ const (
 	FlagIsThirdPartyModel = 0x10
 )
 
+// ErrorKind 枚举（v1.0.1）：把 api-error 行的错误类型粗分类，用于 rate-limit signal。
+// 只从 message.content[0].text 的前缀里识别——这段文本是 Claude Code 客户端归类后的标签，
+// 不是用户 prompt，可以安全提取。
+const (
+	ErrorKindRateLimit  = "rate_limit"
+	ErrorKindOverloaded = "overloaded"
+	ErrorKindTimeout    = "timeout"
+	ErrorKindOther      = "other"
+)
+
 // ClaudeUsageEvent 是单行 jsonl 解析后的中间事件。
 // 字段命名遵循"原 jsonl 字段名小写 → Go Pascal 大写"约定。
 type ClaudeUsageEvent struct {
@@ -38,6 +48,7 @@ type ClaudeUsageEvent struct {
 	HasUsage     bool // message.usage 块是否存在
 	IsApiError   bool // 顶层 isApiErrorMessage:true
 	IsThirdParty bool // 非 claude-* 前缀（且非 <synthetic>）
+	ErrorKind    string // v1.0.1: rate_limit / overloaded / timeout / other（仅 IsApiError 行有效，否则空）
 	SourceFile   string
 }
 

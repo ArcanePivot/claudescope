@@ -327,6 +327,14 @@
             return `${m / 60}h`;
         return `${m}min`;
     };
+    const formatRatio = (ratio) => {
+        const r = Number(ratio) || 0;
+        if (r >= 10)
+            return `${r.toFixed(0)}×`;
+        if (r >= 2)
+            return `${r.toFixed(1)}×`;
+        return `${r.toFixed(2)}×`;
+    };
     const pressureRiskRow = (window, fallbackName) => {
         if (!window || typeof window !== "object") {
             return {
@@ -343,27 +351,62 @@
         const peak = window.peak || {};
         const tokens = Number(current.tokens) || 0;
         const percent = Number(current.percent) || 0;
+        const ratio = Number(current.ratio) || 0;
+        const overflow = !!current.overflow;
         const threshold = Number(window.tokenThreshold) || 0;
         const peakTokens = Number(peak.tokens) || 0;
         const peakPercent = Number(peak.percent) || 0;
+        const peakRatio = Number(peak.ratio) || 0;
+        const peakOverflow = !!peak.overflow;
         const thresholdLabel = threshold ? fmt(threshold) : "未设置";
         const noteParts = [];
         noteParts.push(`累计 ${fmt(tokens)} / 阈值 ${thresholdLabel}`);
         if (peakTokens > 0) {
-            noteParts.push(`峰值 ${pct(peakPercent)}（${fmt(peakTokens)}）`);
+            const peakLabel = peakOverflow ? `${formatRatio(peakRatio)}（${fmt(peakTokens)}）` : `${pct(peakPercent)}（${fmt(peakTokens)}）`;
+            noteParts.push(`峰值 ${peakLabel}`);
         }
         noteParts.push("本地压力估算 · 不代表 Anthropic 官方剩余额度");
+        const displayLabel = overflow ? `${pct(percent)} · ${formatRatio(ratio)}` : pct(percent);
         return {
             name: `${windowLabel}压力`,
             value: percent,
-            label: `${pct(percent)}`,
+            label: displayLabel,
             note: noteParts.join(" · "),
-            tone: "amber",
-            percentLabel: pct(percent),
+            tone: overflow ? "red" : "amber",
+            percentLabel: displayLabel,
+            overflow,
+        };
+    };
+    const rateLimitRiskRow = (signal) => {
+        if (!signal || typeof signal !== "object") {
+            return null;
+        }
+        const count7d = Number(signal.count7d) || 0;
+        const count30d = Number(signal.count30d) || 0;
+        const countAll = Number(signal.countAll) || 0;
+        if (countAll === 0) {
+            return null;
+        }
+        const lastHit = Number(signal.lastHitTs) || 0;
+        const lastHitLabel = lastHit > 0 ? new Date(lastHit).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "--";
+        const noteParts = [`7天 ${count7d} · 30天 ${count30d} · 全部 ${countAll}`];
+        if (lastHit > 0)
+            noteParts.push(`最近 ${lastHitLabel}`);
+        noteParts.push("Anthropic 真实下发的限流/过载信号");
+        return {
+            name: "rate-limit 命中",
+            value: Math.min(100, count7d * 20),
+            label: `${count7d} 次 / 7天`,
+            note: noteParts.join(" · "),
+            tone: count7d > 0 ? "red" : "amber",
+            percentLabel: `${countAll} 全部`,
         };
     };
     const pressureSummary = data.pressure || {};
     const pressureDisclaimer = pressureSummary.disclaimer || "本地压力估算 · 不代表 Anthropic 官方剩余额度";
+    const pressurePreset = String(pressureSummary.preset || "pro");
+    const pressureBaseline = String(pressureSummary.baseline || "");
+    const pressureRateLimit = pressureSummary.rateLimit || null;
     const localDayStart = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
     const ymd = (date) => {
         const y = date.getFullYear();
@@ -795,12 +838,13 @@
                 cost: row.cost || 0,
                 percent: Math.round((row.cost || 0) / maxModelCost * 100),
             })),
-            risk: [
+            risk: ([
                 pressureRiskRow(pressureSummary.primary, "5 小时窗口"),
                 pressureRiskRow(pressureSummary.secondary, "7 天窗口"),
+                rateLimitRiskRow(pressureRateLimit),
                 { name: "缓存读取", value: null, label: fmt(cachedReadTokens), note: "已读取的缓存 token", tone: "teal", percentLabel: "--" },
                 { name: "失败", value: failureRate, label: `${failureRate.toFixed(1)}%`, note: `${failures.length} 次失败`, tone: "amber" },
-            ],
+            ]).filter(Boolean),
         };
     };
     const normalizeTrendRows = (rows, stepLabel = "", stepMinutes = 0) => (rows || []).map((row) => Array.isArray(row)
@@ -914,16 +958,31 @@
     setText("sourceSecondary", isSampleData ? "直接预览" : "本地日志");
     const riskApplied = data?.notes?.riskApplied === true;
     const riskSourceRaw = String(data?.riskConfig?.source || "");
+    const presetLabel = (p) => {
+        switch (String(p || "").toLowerCase()) {
+            case "pro": return "Pro 档";
+            case "max-5x": return "Max 5×";
+            case "max-20x": return "Max 20×";
+            case "custom": return "自定义";
+            default: return p || "Pro 档";
+        }
+    };
     const riskSourceDisplay = () => {
         if (!riskApplied)
-            return "Phase 3B 未启用";
-        if (!riskSourceRaw || riskSourceRaw === "builtin")
-            return "本地压力估算 · 内置阈值";
-        if (riskSourceRaw.startsWith("user-config-broken"))
-            return "本地压力估算 · 用户配置异常（已回退内置）";
-        if (riskSourceRaw.startsWith("user-config:"))
-            return "本地压力估算 · 用户配置";
-        return `本地压力估算 · ${riskSourceRaw}`;
+            return "未启用本地压力估算";
+        const presetTag = presetLabel(pressurePreset);
+        if (!riskSourceRaw)
+            return `本地压力估算 · ${presetTag}`;
+        if (riskSourceRaw.startsWith("builtin")) {
+            return `本地压力估算 · ${presetTag}（社区估算 · ${pressureBaseline || "内置基线"}）`;
+        }
+        if (riskSourceRaw.startsWith("user-config-broken")) {
+            return `本地压力估算 · 用户配置异常（已回退 ${presetTag} 内置）`;
+        }
+        if (riskSourceRaw.startsWith("user-config:")) {
+            return `本地压力估算 · ${presetTag}（用户配置 ~/.claude-scope/risk.json）`;
+        }
+        return `本地压力估算 · ${presetTag}`;
     };
     const tertiaryLabel = isSampleData
         ? "运行脚本看真实数据"
@@ -1281,7 +1340,7 @@
         $("riskList").innerHTML = rows.map((row, index) => `
       <div class="risk-row">
         <span class="risk-icon">${labels[index] || "•"}</span><strong>${esc(row.name)}</strong>
-        <span class="track"><span class="fill ${row.tone === "teal" ? "teal" : row.tone === "amber" ? "amber" : ""}" style="display:block;width:${row.value === null || row.value === undefined ? 0 : Math.max(2, Math.min(100, row.value || 0))}%"></span></span>
+        <span class="track"><span class="fill ${row.tone === "teal" ? "teal" : row.tone === "red" ? "red" : row.tone === "amber" ? "amber" : ""}" style="display:block;width:${row.value === null || row.value === undefined ? 0 : Math.max(2, Math.min(100, row.value || 0))}%"></span></span>
         <span class="value">${esc(row.label)}${row.note ? `<small>${esc(row.note)}</small>` : ""}</span><span class="percent">${esc(row.percentLabel ?? pct(row.value))}</span>
       </div>`).join("") + `
       <div class="warning">

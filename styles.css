@@ -675,6 +675,10 @@ main {
   background: var(--amber);
 }
 
+.fill.red {
+  background: var(--red);
+}
+
 .quota-note {
   grid-column: 2 / -1;
   margin-top: -7px;
@@ -1997,6 +2001,36 @@ main {
 .session-toggle {
   flex: none;
   margin-left: auto;
+}
+
+/* #subagentToggle 复用 .dist-toggle 外观，但文案是 4 字按钮（"聚合主会话"/"展开子代理"），
+   原 98px 固宽 + overflow:hidden 会把第二个按钮整体剪掉、表现为"看似遮挡、点不到"。
+   这里单独放开宽度，并给 .subagent-mode 自己的尺寸。 */
+#subagentToggle.dist-toggle {
+  width: auto;
+}
+
+.subagent-mode {
+  appearance: none;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 0;
+  border-left: 1px solid #dbe7f5;
+  background: transparent;
+  color: #314863;
+  font-size: 12px;
+  font-weight: 740;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.subagent-mode:first-child {
+  border-left: 0;
+}
+
+.subagent-mode.active {
+  background: var(--blue);
+  color: #fff;
 }
 
 .distribution-chart {

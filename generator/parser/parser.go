@@ -187,5 +187,34 @@ func extractEvent(line string) ClaudeUsageEvent {
 		e.IsThirdParty = true
 	}
 
+	// v1.0.1：从 message.content[0].text 提取错误分类，给 risk rate-limit signal 用。
+	// 这段文本是 Claude Code 客户端归类后的标签（"API Error: 429 Rate Limit" 之类），
+	// 不是用户 prompt。隐私上仅做模式匹配，不存原文。
+	if e.IsApiError {
+		text := gjson.Get(line, "message.content.0.text").String()
+		e.ErrorKind = classifyErrorText(text)
+	}
+
 	return e
+}
+
+// classifyErrorText 把错误标签文本归到固定枚举。
+// 不存原文；只返回 ErrorKind* 之一。
+func classifyErrorText(text string) string {
+	lower := strings.ToLower(text)
+	switch {
+	case strings.Contains(lower, "429"),
+		strings.Contains(lower, "rate limit"),
+		strings.Contains(lower, "rate_limit"):
+		return ErrorKindRateLimit
+	case strings.Contains(lower, "529"),
+		strings.Contains(lower, "overloaded"):
+		return ErrorKindOverloaded
+	case strings.Contains(lower, "504"),
+		strings.Contains(lower, "timeout"),
+		strings.Contains(lower, "upstream"):
+		return ErrorKindTimeout
+	default:
+		return ErrorKindOther
+	}
 }

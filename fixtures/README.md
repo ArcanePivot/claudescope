@@ -1,6 +1,6 @@
 # ClaudeScope Fixtures
 
-> 7 份合成 jsonl 样本，用于 generator 单元测试。**不含真实用户数据**，所有 prompt/text 都是 `<placeholder>`。
+> 8 份合成 jsonl 样本，用于 generator 单元测试。**不含真实用户数据**，所有 prompt/text 都是 `<placeholder>`。
 
 ---
 
@@ -12,6 +12,7 @@
 | `subagent.jsonl` | 解析为 2 条 assistant usage 行，flags 含 `IS_SUBAGENT (0x01)` | `isSidechain:true`，含 `agentId` |
 | `synthetic.jsonl` | 2 条 `<synthetic>` 行被 generator drop，1 条真实 Opus 行保留；filteredCounts.synthetic=2 | `message.model == "<synthetic>"` |
 | `api-error.jsonl` | 1 条 usage=0 错误行打 `IS_FAILURE \| HAS_ERROR (0x0c)`；1 条无 usage 错误行进 `failureRecordsV3` 但**不**进 token total；1 条成功行正常 | `isApiErrorMessage:true`（一个有 usage、一个无） |
+| `rate-limit.jsonl` | 4 条 `isApiErrorMessage:true` 无 usage 行，分别归类为 `rate_limit`（429×2）/ `overloaded`（529×1）/ `timeout`（504×1）；预期 `pressure.rateLimit.countAll == 3`（rate_limit+overloaded，timeout 不计入） | v1.0.1 rate-limit 真实信号 |
 | `duplicate-message.jsonl` | 3 条相同 `message.id+requestId` 行 dedup 为 1；1 条 unique strong-key 行；1 条缺 requestId 但有 uuid 的行（uuid fallback）→ `dedupStats.rawUsageRows=5, keptUsageRows=3, duplicatesSkipped=2, uuidFallbackRows=1, weakKeyRows=0` | 故意构造重复 + uuid 兜底（fixture 不含极端 weak-key 行；真实日志 uuid 100% 覆盖，weakKeyRows 几乎不会被触发） |
 | `third-party-history.jsonl` | 2 条非 claude 模型行打 `IS_THIRD_PARTY_MODEL (0x10)`，不进主统计；1 条 native claude 行正常；filteredCounts.thirdParty=2 | `model: gpt-5.4 / kimi-k2.6` |
 | `empty.jsonl` | 解析无 panic，返回 0 条事件 | 文件为空 |

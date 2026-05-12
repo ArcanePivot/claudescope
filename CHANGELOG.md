@@ -2,6 +2,41 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.0.1] - 2026-05-12
+
+聚焦「本地压力可信度」：preset 系统 + 真实 rate-limit 信号 + overflow 透传。功能新增，不改 schema 主版本（仍是 v3）。
+
+### 新增
+
+- **preset 系统**：`pro` / `max-5x` / `max-20x` / `custom` 四档，自动按 Pro 基线放大阈值（5h / 7d 同步）
+  - CLI 新增 `--preset` flag，优先级 CLI > `risk.json` 文件 preset > 内置 `pro`
+  - 启动时 stderr 输出 hint：`[risk] preset='<p>'（阈值来自社区估算 <baseline>，非 Anthropic 官方额度）`
+- **rate-limit 真实信号**：parser 从 `isApiErrorMessage:true` 行的 `message.content[0].text` 按枚举分类（`rate_limit` / `overloaded` / `timeout` / `other`），仅前两类计入 `pressure.rateLimit`
+  - 输出 7 天 / 30 天 / 全部命中数 + 最近 10 条 hit（含 sessionId、model、kind）
+  - 这是 v1.0.1 里**唯一**来自 Anthropic 真实信号的指标
+- **overflow ratio**：`pressure.{primary,secondary}.{current,peak}` 新增 `ratio`（不 clamp 的真实倍数）和 `overflow`（bool）字段；UI 在超阈值时显示 `100% · 2.3×` 而不是看起来"才刚到 100%"
+- **容量导向 weights**：`riskConfig.weights` 默认 `{input:1, output:1, cacheCreate:1, cacheRead:0.1}`，cache_read 因为是被复用过的 prompt，对 rate-limit 压力贡献低；用户可在 `risk.json` 覆盖
+- **baseline 标签**：`riskConfig.baseline` 默认 `community-estimate-2026-05`，自校准后改为 `self-calibrated-YYYY-MM` 即可
+- **fixture**：`fixtures/rate-limit.jsonl`（4 条无 usage 错误行覆盖 429/529/504 三种 kind）+ `TestRateLimitFixture` 单测
+
+### 修改
+
+- `docs/risk-config.md` 完整重写：新增「什么是本地压力」章节，明示 ClaudeScope 没有也无法拿到官方剩余额度
+- `riskConfig.source` 格式：`builtin` → `builtin:preset=<p>` / `user-config:<path>（preset=<p>）`，前端 chips 同步展示 preset
+- 前端 risk 卡 tone 在 `overflow=true` 时升级红色（社区估算阈值都不够用了 = 该警惕）
+- README 中英补充 preset / rate-limit / 多账户 disclaimer 说明
+
+### 修复
+
+- `LoadRiskConfigWithPreset("")` 之前会把空 CLI preset 经 `normalizePreset` 规范成 `"pro"`，导致 risk.json 里的 `preset` 字段被覆盖；现在空字符串保持空，仅在非空时归一化
+- `release.yml` GitHub Actions 升级到 Node 24 兼容版本（checkout v5 / setup-go v6 / setup-node v5 / upload-artifact v5 / action-gh-release v3）
+
+### 兼容性
+
+- 数据 schema 仍是 v3。v1.0 的 `data.js` 在 v1.0.1 前端打开会缺 `pressure.preset / baseline / rateLimit / ratio` 字段，UI 会回退到原 v1.0 显示（无 preset 标签、无 rate-limit 行、不显示 `×` 倍数）。重跑 generator 即可获得完整 v1.0.1 显示。
+
+---
+
 ## [1.0.0] - 2026-05-11
 
 ClaudeScope 首个公开版本。从上游 [CodexScope](https://github.com/JUk1-GH/CodexScope) fork 改造，专门服务 Anthropic Claude Code 工作流。

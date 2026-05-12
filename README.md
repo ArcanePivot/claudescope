@@ -21,10 +21,13 @@ ClaudeScope is built for that narrow job: generate a local export, open a local 
 - Session and model rankings with token totals, request counts, and estimated cost
 - Subagent-aware accounting: merge into parent sessions by default, expand on demand
 - Local pressure estimation for 5-hour and 7-day windows with explicit disclaimers
+- Preset switch: `--preset pro / max-5x / max-20x / custom` scales thresholds off a Pro baseline
+- Overflow ratio: when usage exceeds the threshold, the UI shows `100% · 2.3×` instead of silently clamping
+- Rate-limit hits: real Anthropic signals extracted from 429/529 error rows in your jsonl (7d/30d/all counts)
 - Cost estimation by model and token type using public Anthropic USD prices
 - Clear `unpriced` badges for unknown/custom models instead of silently showing `$0.00`
 - User pricing overrides via `~/.claude-scope/pricing.json`
-- User pressure thresholds via `~/.claude-scope/risk.json`
+- User pressure thresholds + weights via `~/.claude-scope/risk.json`
 - Automatic filtering for `<synthetic>` placeholder rows
 - macOS and Windows release packages with prebuilt generators
 
@@ -50,10 +53,12 @@ xattr -dr com.apple.quarantine .
 The release binary and the source-tree `bin/claude-scope` wrapper support:
 
 ```bash
-claudescope generate [--root <dir>] [--out <file>] [--since <RFC3339>] [--window-days <n>]
+claudescope generate [--root <dir>] [--out <file>] [--since <RFC3339>] [--window-days <n>] [--preset <pro|max-5x|max-20x|custom>]
 claudescope open     [--out <file>]
 claudescope version
 ```
+
+`--preset` selects the local pressure preset. Priority: CLI flag > `risk.json` `preset` field > built-in `pro`.
 
 From source:
 

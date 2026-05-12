@@ -28,6 +28,7 @@ type Options struct {
 	Out        string    // 输出 data.js 路径；缺省 data.js
 	Since      time.Time // 仅保留之后的事件；零值表示全量
 	WindowDays int       // 写入 windowDays 元数据
+	Preset     string    // v1.0.1: pro / max-5x / max-20x / custom；空 → 走 risk.json 或 builtin
 	Stderr     *os.File  // 进度/警告输出；nil 时回退 os.Stderr
 }
 
@@ -77,11 +78,16 @@ func Run(opts Options) (Result, error) {
 		fmt.Fprintf(stderr, "[警告] %v\n", pricingErr)
 	}
 
-	riskCfg, riskErr := risk.LoadRiskConfig()
+	riskCfg, riskErr := risk.LoadRiskConfigWithPreset(opts.Preset)
 	if riskErr != nil {
 		fmt.Fprintf(stderr, "[警告] %v\n", riskErr)
 	}
-	pressure := risk.ComputePressure(res.KeptEvents, riskCfg, time.Now())
+	emitRiskHint(stderr, riskCfg)
+	now := time.Now()
+	pressure := risk.ComputePressure(res.KeptEvents, riskCfg, now)
+	if signal := risk.ComputeRateLimitSignal(res.NoUsageErrors, now); signal != nil {
+		pressure.RateLimit = signal
+	}
 
 	payload := dataPayload{
 		SchemaVersion: SchemaVersion,
@@ -132,6 +138,18 @@ func Run(opts Options) (Result, error) {
 		RowsKept:     len(rows),
 		OutPath:      outPath,
 	}, nil
+}
+
+// emitRiskHint 在用 builtin preset 时往 stderr 打一行透明提示（plan A6）。
+// user-config 来源不打提示（用户已经手动配置过了）。
+func emitRiskHint(stderr *os.File, cfg risk.RiskConfig) {
+	if !strings.HasPrefix(cfg.Source, "builtin") {
+		return
+	}
+	fmt.Fprintf(stderr,
+		"[risk] preset='%s'（阈值来自社区估算 %s，非 Anthropic 官方额度）\n"+
+			"       要校准请改 --preset 或写 ~/.claude-scope/risk.json，详见 docs/risk-config.md\n",
+		cfg.Preset, cfg.Baseline)
 }
 
 // DefaultClaudeRoot 返回 ~/.claude/projects 的绝对路径，HOME 取不到时返回空串。

@@ -234,6 +234,39 @@ func TestApiError(t *testing.T) {
 	}
 }
 
+// TestRateLimitFixture (v1.0.1) — 4 个 isApiErrorMessage:true 无 usage 行，
+// classifyErrorText 应该把它们归到 rate_limit×2 / overloaded×1 / timeout×1。
+func TestRateLimitFixture(t *testing.T) {
+	res := parseFixture(t, "rate-limit.jsonl")
+
+	// 全部 4 条 → NoUsageErrors，主 KeptEvents 为空
+	if len(res.NoUsageErrors) != 4 {
+		t.Fatalf("rate-limit NoUsageErrors len = %d, want 4", len(res.NoUsageErrors))
+	}
+	if len(res.KeptEvents) != 0 {
+		t.Errorf("rate-limit KeptEvents = %d, want 0", len(res.KeptEvents))
+	}
+
+	wantErr := ErrorStats{ApiErrorsTotal: 4, ApiErrorsWithUsage: 0, ApiErrorsNoUsage: 4}
+	if res.ErrorStats != wantErr {
+		t.Errorf("rate-limit ErrorStats = %+v, want %+v", res.ErrorStats, wantErr)
+	}
+
+	counts := map[string]int{}
+	for _, e := range res.NoUsageErrors {
+		counts[e.ErrorKind]++
+	}
+	if counts[ErrorKindRateLimit] != 2 {
+		t.Errorf("rate_limit kind count = %d, want 2 (got map %+v)", counts[ErrorKindRateLimit], counts)
+	}
+	if counts[ErrorKindOverloaded] != 1 {
+		t.Errorf("overloaded kind count = %d, want 1 (got map %+v)", counts[ErrorKindOverloaded], counts)
+	}
+	if counts[ErrorKindTimeout] != 1 {
+		t.Errorf("timeout kind count = %d, want 1 (got map %+v)", counts[ErrorKindTimeout], counts)
+	}
+}
+
 func TestDuplicate(t *testing.T) {
 	res := parseFixture(t, "duplicate-message.jsonl")
 	want := DedupStats{

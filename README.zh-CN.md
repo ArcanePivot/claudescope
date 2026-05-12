@@ -18,7 +18,9 @@ ClaudeScope 把这些指标算在本地，不上传到任何服务器。
 
 ## 不是什么
 
-ClaudeScope 显示的是**本地压力估算**，不是官方剩余额度。Anthropic 不公开账户级 quota；面板上的 5 小时 / 7 天压力百分比用的是用户配置的 token 阈值（缺省取社区流传的 Pro 档），仅用于"本地预警"。真正的额度状态请以 Anthropic 控制台为准。
+ClaudeScope 显示的是**本地压力估算**，不是官方剩余额度。Anthropic 不公开账户级 quota；面板上的 5 小时 / 7 天压力百分比用的是「窗口内累计 token / 社区估算阈值」，仅用于"本地预警"。真正的额度状态请以 Anthropic 控制台为准。
+
+唯一来自 Anthropic 真实信号的指标是 v1.0.1 新增的 **rate-limit 命中计数** —— 那是从你 jsonl 里 429/529 错误行抓出来的，是「Anthropic 真的拒绝了你」。
 
 ## 功能
 
@@ -26,9 +28,12 @@ ClaudeScope 显示的是**本地压力估算**，不是官方剩余额度。Anth
 - 范围切换：近 24 小时、今天、近 7 天、近 30 天、历史总览、自定义区间
 - 会话排行 + 模型排行：合并主会话 / 子代理；toggle 切到展开视图
 - 本地压力估算：5 小时 + 7 天双窗口，琥珀橙配色 + 显式 disclaimer
+- preset 一键切换：`--preset pro / max-5x / max-20x / custom`，自动按 Pro 基线放大阈值
+- overflow 透传：当真实倍数超过阈值（如 2.3×），UI 显示 `100% · 2.3×` 而不是看起来"才刚到 100%"
+- rate-limit 真实信号：从 jsonl 里 429 / 529 错误行抓出来的命中计数（7d / 30d / 全部）
 - 费用估算：按 Anthropic 公开美元价格表，未定价模型给醒目"未定价"徽章
 - 自定义价格：`~/.claude-scope/pricing.json` 完全 override 内置规则
-- 自定义阈值：`~/.claude-scope/risk.json` 调整 5h / 7d 压力窗口
+- 自定义阈值 + weights：`~/.claude-scope/risk.json` 调整 5h / 7d 压力窗口 + 容量权重
 - `<synthetic>` 占位行自动过滤，不污染统计
 - macOS / Windows 双平台启动器，发布包内置预编译二进制，普通用户不用装 Go
 
@@ -50,12 +55,13 @@ ClaudeScope 显示的是**本地压力估算**，不是官方剩余额度。Anth
 发布包内的 `claudescope` 二进制和源码仓的 `bin/claude-scope` 都接受三个子命令：
 
 ```bash
-claudescope generate [--root <dir>] [--out <file>] [--since <RFC3339>] [--window-days <n>]
+claudescope generate [--root <dir>] [--out <file>] [--since <RFC3339>] [--window-days <n>] [--preset <pro|max-5x|max-20x|custom>]
 claudescope open     [--out <file>]
 claudescope version
 ```
 
 - `generate`：扫描 `~/.claude/projects/`，写入 `data.js`
+- `--preset`：本地压力 preset。CLI > `risk.json` 文件 preset > 内置 `pro`
 - `open`：在系统默认浏览器中打开 `data.js` 同目录的 `index.html`
 - `version`：打印版本号
 

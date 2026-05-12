@@ -22,7 +22,7 @@ import (
 )
 
 // Version 由 ldflags 在 build-release 阶段注入；缺省值反映源码状态。
-var Version = "1.0.0-dev"
+var Version = "1.0.1-dev"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -53,6 +53,7 @@ func runGenerate(args []string) {
 	out := fs.String("out", "data.js", "输出文件路径（包成 window.CLAUDESCOPE_DATA）")
 	since := fs.String("since", "", "RFC3339 时间，仅保留之后的事件（缺省全量）")
 	windowDaysFlag := fs.Int("window-days", 0, "限定 windowDays 元数据（仅展示，不影响过滤）")
+	preset := fs.String("preset", "", "本地压力 preset：pro / max-5x / max-20x / custom（缺省走 risk.json 或 builtin pro）")
 	fs.Parse(args)
 
 	cutoff := time.Time{}
@@ -70,6 +71,7 @@ func runGenerate(args []string) {
 		Out:        *out,
 		Since:      cutoff,
 		WindowDays: *windowDaysFlag,
+		Preset:     *preset,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -133,7 +135,7 @@ func printUsage() {
 	fmt.Fprint(os.Stderr, `claudescope - Claude Code 本地用量仪表盘 (v1.0)
 
 用法：
-  claudescope generate [--root <dir>] [--out <file>] [--since <RFC3339>] [--window-days <n>]
+  claudescope generate [--root <dir>] [--out <file>] [--since <RFC3339>] [--window-days <n>] [--preset <pro|max-5x|max-20x|custom>]
   claudescope open     [--out <file>]
   claudescope version
   claudescope help
